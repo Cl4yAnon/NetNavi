@@ -1,0 +1,12 @@
+[
+    {
+        "name": "Local-Termux-Hub",
+        "ip": "127.0.0.1",
+        "last_seen": "2026-10-29 15:17:35.406668"
+    },
+    {
+        "name": "Target-Node-01",
+        "ip": "192.168.1.50",
+        "last_seen": "Never"
+    }
+]
