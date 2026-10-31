@@ -4,3 +4,4 @@ rockyou.txt
 __pycache__/
 *.pyc
 .netnavi_storage/
+.env
