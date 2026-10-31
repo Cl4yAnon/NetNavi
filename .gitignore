@@ -1,0 +1,6 @@
+rockyou.txt
+*.tar.gz
+*.json
+__pycache__/
+*.pyc
+.netnavi_storage/
