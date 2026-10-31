@@ -1,276 +1,336 @@
-# -*- coding: utf-8 -*-
-import os
 import subprocess
-import sys
 import datetime
+import re
+import os
 import json
-from groq import Groq
+import socket
 
-class NetNaviUI:
-    def __init__(self):
-        self.node_ip = "192.168.1.50"
-        self.memory_file = "netnavi_memory.json"
-        self.running = True
-        self.load_memory_state()
+# ANSI Color Codes for Termux
+C_BLUE = "\033[94m"
+C_GREEN = "\033[92m"
+C_RED = "\033[91m"
+C_CYAN = "\033[96m"
+C_RESET = "\033[0m"
+
+# External Storage Vault Path (Outside NetNavi directory)
+VAULT_DIR = os.path.expanduser("~/.netnavi_storage")
+os.makedirs(VAULT_DIR, exist_ok=True)
+
+def get_network_info():
+    node_ip = "127.0.0.1"
+    gateway = "192.168.1.1"
+    isp = "PLDT / Smart"
+    
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('10.255.255.255', 1))
+        node_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
         try:
-            self.groq_client = Groq()
-            self.ai_enabled = True
+            res_ip = subprocess.run(["ip", "addr", "show", "wlan0"], capture_output=True, text=True, timeout=1)
+            match_ip = re.search(r"inet\s+(\d+\.\d+\.\d+\.\d+)", res_ip.stdout)
+            if match_ip:
+                node_ip = match_ip.group(1)
         except Exception:
-            self.ai_enabled = False
+            pass
 
-    def load_memory_state(self):
-        self.memory_data = {
-            "operator_name": "Unknown Operator",
-            "custom_memory": {},
-            "scan_history": []
+    try:
+        res = subprocess.run(["ip", "route"], capture_output=True, text=True, timeout=1)
+        match = re.search(r"via\s+(\d+\.\d+\.\d+\.\d+)", res.stdout)
+        if match:
+            gateway = match.group(1)
+    except Exception:
+        pass
+
+    if node_ip != "127.0.0.1":
+        subnet_prefix = ".".join(node_ip.split('.')[:3])
+        if not gateway.startswith(subnet_prefix):
+            if "192.168.100." in node_ip:
+                gateway = "192.168.100.1"
+            elif "192.168.254." in node_ip:
+                gateway = "192.168.254.254"
+            else:
+                gateway = subnet_prefix + ".1"
+    
+    if "192.168.100." in node_ip or "192.168.100." in gateway:
+        isp = "Globe Fiber (192.168.100.x)"
+    elif "192.168.254." in node_ip or "192.168.254." in gateway:
+        isp = "Globe Default (192.168.254.x)"
+    elif "192.168.1." in node_ip or "192.168.0." in node_ip:
+        isp = "PLDT / Smart"
+    else:
+        isp = f"Custom Gateway ({gateway.rsplit('.', 1)[0]}.x)"
+        
+    return node_ip, gateway, isp
+
+def get_vault_filepath(gateway_ip):
+    return os.path.join(VAULT_DIR, f"{gateway_ip.replace('.', '_')}.json")
+
+def load_or_init_vault(gateway_ip):
+    path = get_vault_filepath(gateway_ip)
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                vault_data = json.load(f)
+                # Migration check: if old format, upgrade to 4-slot structure automatically
+                if "slots" not in vault_data:
+                    vault_data["slots"] = {
+                        "quick_router": {"type": vault_data.get("quick_scan_type", "None"), "results": vault_data.get("quick_results", []), "timestamp": vault_data.get("quick_timestamp", "")},
+                        "quick_network": {"type": "None", "results": [], "timestamp": ""},
+                        "deep_router": {"type": vault_data.get("deep_scan_type", "None"), "results": vault_data.get("deep_results", []), "timestamp": vault_data.get("deep_timestamp", "")},
+                        "deep_network": {"type": "None", "results": [], "timestamp": ""}
+                    }
+                return vault_data
+        except Exception:
+            pass
+            
+    # Option B Immersive Prompt for new networks
+    print(f"\n{C_GREEN}[!] New Network Gateway Detected ({gateway_ip}){C_RESET}")
+    ssid_name = input("Awaiting Matrix Designation / SSID Name > ").strip() or f"Network_{gateway_ip}"
+    
+    vault_data = {
+        "gateway": gateway_ip,
+        "ssid_name": ssid_name,
+        "slots": {
+            "quick_router": {"type": "None", "results": [], "timestamp": ""},
+            "quick_network": {"type": "None", "results": [], "timestamp": ""},
+            "deep_router": {"type": "None", "results": [], "timestamp": ""},
+            "deep_network": {"type": "None", "results": [], "timestamp": ""}
         }
-        if os.path.exists(self.memory_file):
-            try:
-                with open(self.memory_file, "r") as f:
-                    loaded = json.load(f)
-                    if isinstance(loaded, dict):
-                        self.memory_data.update(loaded)
-            except Exception:
-                pass
+    }
+    save_vault(vault_data)
+    print(f"{C_CYAN}[*] Profile '{ssid_name}' successfully bound to offline vault.{C_RESET}\n")
+    return vault_data
+
+def save_vault(data):
+    path = get_vault_filepath(data["gateway"])
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"[!] Error saving to offline vault: {e}")
+
+def render_dashboard():
+    node_ip, gateway, isp = get_network_info()
+    vault_data = load_or_init_vault(gateway)
+    print(f"[ NETNAVI v1.5 [Secured C2 Matrix] ]  -> [ Active Profile: {C_CYAN}{vault_data['ssid_name']} ({gateway}){C_RESET} ]\n")
+    print(f"[*] System Time // {datetime.datetime.now().strftime('%H:%M:%S | %a, %b %d %Y')}")
+    print("## WLAN Status (Live Sweep)")
+    print(f" - Node IP Address     : {node_ip}")
+    print(f" - Router Gateway      : {gateway}")
+    print(f" - ISP Provider        : {isp}")
+    print("\n## Interactive CLI")
+    print(f" 1: {C_BLUE}Transcend{C_RESET} - This is Where the Magic Begins\n")
+
+def run_and_store_scan(cmd_args, scan_name, slot_key):
+    node_ip, gateway_ip, _ = get_network_info()
+    vault_data = load_or_init_vault(gateway_ip)
+    
+    slot = vault_data["slots"][slot_key]
+    if slot["results"]:
+        print(f"\n{C_RED}[!] Scan logs already exist in slot '{slot_key}' for '{vault_data['ssid_name']}' (Scanned: {slot['timestamp']}){C_RESET}")
+        choice = input(f"[*] Overwrite existing logs in slot '{slot_key}'? (y/n): ").strip().lower()
+        if choice not in ["y", "yes"]:
+            print(f"[*] Scan aborted. Preserving existing vault logs.\n")
+            return
+
+    print(f"\n[*] Running {scan_name}...\n")
+    results = []
+    try:
+        process = subprocess.run(cmd_args, capture_output=True, text=True)
+        lines = process.stdout.splitlines()
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("SF-"):
+                continue
+            if any(keyword in stripped for keyword in ["PORT", "/tcp", "/udp", "open", "closed", "filtered", "unrecognized", "Host is up", "Nmap scan report", "report"]):
+                print(f" {line}")
+                results.append(line)
+        print()
         
-        self.operator_name = self.memory_data.get("operator_name", "Unknown Operator")
-        self.gateway = self.detect_gateway()
+        timestamp = datetime.datetime.now().strftime('%b %d, %Y - %H:%M:%S')
+        slot["type"] = scan_name
+        slot["results"] = results
+        slot["timestamp"] = timestamp
+            
+        save_vault(vault_data)
+        print(f"{C_CYAN}[*] Results permanently archived to slot '{slot_key}' in profile '{vault_data['ssid_name']}'{C_RESET}\n")
+    except Exception as e:
+        print(f"[!] Error executing scan: {e}\n")
 
-    def save_memory_state(self):
-        self.memory_data["operator_name"] = self.operator_name
-        with open(self.memory_file, "w") as f:
-            json.dump(self.memory_data, f, indent=2)
+render_dashboard()
 
-    def detect_gateway(self):
-        try:
-            res = subprocess.run(["ip", "route", "show", "default"], capture_output=True, text=True)
-            for line in res.stdout.splitlines():
-                if "via" in line:
-                    parts = line.split()
-                    return parts[parts.index("via") + 1]
-        except Exception:
-            pass
-        return "192.168.1.1"
-
-    def check_tailscale_status(self):
-        """Checks if Tailscale is active by scanning ifconfig output for tun interfaces or 100. IP."""
-        try:
-            res = subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=2)
-            output = res.stdout
-            if "tun" in output or "tailscale0" in output or "100." in output:
-                return "ONLINE"
-        except Exception:
-            pass
-        return "OFFLINE"
-
-    def log_scan(self, action_type, target, data):
-        history = self.memory_data.get("scan_history", [])
-        history.append({
-            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "action": action_type,
-            "target": target,
-            "result": data
-        })
-        self.memory_data["scan_history"] = history
-        self.save_memory_state()
-
-    def get_learned_memory(self):
-        custom = self.memory_data.get("custom_memory", {})
-        history = self.memory_data.get("scan_history", [])
+while True:
+    try:
+        user_input = input("NetNavi > ").strip()
+        lower_input = user_input.lower()
         
-        output = [f"[*] Operator: {self.operator_name}"]
-        if custom:
-            output.append("## Learned Facts:")
-            for k, v in custom.items():
-                output.append(f"    - {k}: {v}")
-        
-        if history:
-            output.append("## Recent Scans:")
-            for item in history[-3:]:
-                output.append(f"    - [{item['time']}] {item['action']} -> {item['target']}")
+        if not user_input:
+            continue
+            
+        if lower_input in ["exit", "quit"]:
+            print("[*] Shutting down matrix session.")
+            break
+            
+        elif lower_input in ["clear", "cls"]:
+            subprocess.run(["clear"])
+            render_dashboard()
+
+        elif lower_input in ["wlan", "refresh", "status"]:
+            print("\n[*] Re-sweeping WLAN interface and routing table...")
+            render_dashboard()
+
+        # SCANS
+        elif lower_input in ["quick scan router", "router quick scan"]:
+            gateway_ip = get_network_info()[1]
+            cmd = ["nmap", "-F", "-T4", "-n", gateway_ip]
+            run_and_store_scan(cmd, f"Quick Router Scan ({gateway_ip})", "quick_router")
+
+        elif lower_input in ["quick scan", "quick scan network", "transcend", "1"]:
+            node_ip, gateway_ip, _ = get_network_info()
+            subnet_prefix = ".".join(node_ip.split('.')[:3]) + ".0/24"
+            cmd = ["nmap", "-F", "-T4", "-n", subnet_prefix]
+            run_and_store_scan(cmd, f"Quick Network-Wide Sweep ({subnet_prefix})", "quick_network")
+
+        elif lower_input in ["deep scan router", "router deep scan"]:
+            gateway_ip = get_network_info()[1]
+            cmd = ["nmap", "-p-", "-sV", "-T4", gateway_ip]
+            run_and_store_scan(cmd, f"Deep Router Scan ({gateway_ip})", "deep_router")
+
+        elif lower_input in ["deep scan", "deep scan network"]:
+            node_ip, gateway_ip, _ = get_network_info()
+            subnet_prefix = ".".join(node_ip.split('.')[:3]) + ".0/24"
+            cmd = ["nmap", "-p-", "-sV", "-T4", subnet_prefix]
+            run_and_store_scan(cmd, f"Deep Network-Wide Sweep ({subnet_prefix})", "deep_network")
+
+        # SHOW RESULTS (4 Decoupled Slots)
+        elif lower_input in ["show quick router", "show quick scan router", "show router quick"]:
+            gateway_ip = get_network_info()[1]
+            vault_data = load_or_init_vault(gateway_ip)
+            slot = vault_data["slots"]["quick_router"]
+            print(f"\n{C_BLUE}========================================{C_RESET}")
+            print(f"{C_BLUE}[*] QUICK ROUTER VAULT [{vault_data['ssid_name']}]: {slot['type']} ({slot['timestamp'] or 'No timestamp'}){C_RESET}")
+            print(f"{C_BLUE}========================================{C_RESET}")
+            if slot["results"]:
+                for res in slot["results"]:
+                    print(f" {res}")
+            else:
+                print(" [!] No quick router records found.")
+            print(f"{C_BLUE}========================================{C_RESET}\n")
+
+        elif lower_input in ["show quick network", "show quick scan", "show network quick"]:
+            gateway_ip = get_network_info()[1]
+            vault_data = load_or_init_vault(gateway_ip)
+            slot = vault_data["slots"]["quick_network"]
+            print(f"\n{C_BLUE}========================================{C_RESET}")
+            print(f"{C_BLUE}[*] QUICK NETWORK VAULT [{vault_data['ssid_name']}]: {slot['type']} ({slot['timestamp'] or 'No timestamp'}){C_RESET}")
+            print(f"{C_BLUE}========================================{C_RESET}")
+            if slot["results"]:
+                for res in slot["results"]:
+                    print(f" {res}")
+            else:
+                print(" [!] No quick network records found.")
+            print(f"{C_BLUE}========================================{C_RESET}\n")
+
+        elif lower_input in ["show deep router", "show deep scan router", "show router deep"]:
+            gateway_ip = get_network_info()[1]
+            vault_data = load_or_init_vault(gateway_ip)
+            slot = vault_data["slots"]["deep_router"]
+            print(f"\n{C_BLUE}========================================{C_RESET}")
+            print(f"{C_BLUE}[*] DEEP ROUTER VAULT [{vault_data['ssid_name']}]: {slot['type']} ({slot['timestamp'] or 'No timestamp'}){C_RESET}")
+            print(f"{C_BLUE}========================================{C_RESET}")
+            if slot["results"]:
+                for res in slot["results"]:
+                    print(f" {res}")
+            else:
+                print(" [!] No deep router records found.")
+            print(f"{C_BLUE}========================================{C_RESET}\n")
+
+        elif lower_input in ["show deep network", "show deep scan", "show network deep"]:
+            gateway_ip = get_network_info()[1]
+            vault_data = load_or_init_vault(gateway_ip)
+            slot = vault_data["slots"]["deep_network"]
+            print(f"\n{C_BLUE}========================================{C_RESET}")
+            print(f"{C_BLUE}[*] DEEP NETWORK VAULT [{vault_data['ssid_name']}]: {slot['type']} ({slot['timestamp'] or 'No timestamp'}){C_RESET}")
+            print(f"{C_BLUE}========================================{C_RESET}")
+            if slot["results"]:
+                for res in slot["results"]:
+                    print(f" {res}")
+            else:
+                print(" [!] No deep network records found.")
+            print(f"{C_BLUE}========================================{C_RESET}\n")
+
+        # GRANULAR DELETION / PURGE COMMANDS
+        elif lower_input in ["delete quick router", "clear quick router"]:
+            gateway_ip = get_network_info()[1]
+            vault_data = load_or_init_vault(gateway_ip)
+            vault_data["slots"]["quick_router"] = {"type": "None", "results": [], "timestamp": ""}
+            save_vault(vault_data)
+            print(f"{C_GREEN}[*] Quick Router slot cleared successfully.{C_RESET}\n")
+
+        elif lower_input in ["delete quick network", "clear quick network", "delete quick scan"]:
+            gateway_ip = get_network_info()[1]
+            vault_data = load_or_init_vault(gateway_ip)
+            vault_data["slots"]["quick_network"] = {"type": "None", "results": [], "timestamp": ""}
+            save_vault(vault_data)
+            print(f"{C_GREEN}[*] Quick Network slot cleared successfully.{C_RESET}\n")
+
+        elif lower_input in ["delete deep router", "clear deep router"]:
+            gateway_ip = get_network_info()[1]
+            vault_data = load_or_init_vault(gateway_ip)
+            vault_data["slots"]["deep_router"] = {"type": "None", "results": [], "timestamp": ""}
+            save_vault(vault_data)
+            print(f"{C_GREEN}[*] Deep Router slot cleared successfully.{C_RESET}\n")
+
+        elif lower_input in ["delete deep network", "clear deep network", "delete deep scan"]:
+            gateway_ip = get_network_info()[1]
+            vault_data = load_or_init_vault(gateway_ip)
+            vault_data["slots"]["deep_network"] = {"type": "None", "results": [], "timestamp": ""}
+            save_vault(vault_data)
+            print(f"{C_GREEN}[*] Deep Network slot cleared successfully.{C_RESET}\n")
+
+        elif lower_input in ["purge vault", "delete profile"]:
+            gateway_ip = get_network_info()[1]
+            path = get_vault_filepath(gateway_ip)
+            if os.path.exists(path):
+                os.remove(path)
+                print(f"{C_RED}[*] Entire offline profile for gateway {gateway_ip} deleted from vault.{C_RESET}\n")
+            else:
+                print(" [!] No profile file found to purge.")
+
+        # IMMERSIVE SCI-FI TARGET JUMP & HYDRA WORKFLOW
+        elif lower_input in ["jump", "audit", "crack"]:
+            gateway_ip = get_network_info()[1]
+            
+            print(f"\n{C_GREEN}[*] Found Target Cache to Connect{C_RESET}")
+            target_ip = input("Awaiting Target to Jump > ").strip() or gateway_ip
+            target_port = input("Choose your Poison (Port e.g. 80, 21) > ").strip()
+            
+            username = input("Enter target username (default 'admin'): ").strip() or "admin"
+            wordlist = input("Enter path to wordlist (default 'wordlists/rockyou.txt'): ").strip() or "wordlists/rockyou.txt"
+            
+            if not os.path.exists(wordlist):
+                print(f"[!] Warning: Wordlist '{wordlist}' not found. Check path inside your wordlists dir.")
+            
+            print(f"\n{C_BLUE}[*] Jacking into target {target_ip}:{target_port} with user '{username}'...{C_RESET}")
+            
+            if target_port == "80":
+                hydra_cmd = ["hydra", "-l", username, "-P", wordlist, target_ip, "http-get", "/index.html", "-t", "4"]
+            elif target_port == "21":
+                hydra_cmd = ["hydra", "-l", username, "-P", wordlist, f"ftp://{target_ip}", "-t", "4"]
+            else:
+                hydra_cmd = ["hydra", "-l", username, "-P", wordlist, target_ip, "-t", "4"]
                 
-        return "\n".join(output) if (custom or history) else "[-] No historical memory logged yet."
-
-    def display_banner(self):
-        os.system('clear' if os.name == 'posix' else 'cls')
-        current_time = datetime.datetime.now().strftime("%H:%M:%S | %a, %b %d %Y")
-        
-        # Real-time status with bold ANSI terminal color codes
-        tailscale_state = self.check_tailscale_status()
-        if tailscale_state == "ONLINE":
-            ts_display = "\033[1;32mONLINE\033[0m"  # Bold Green
-        else:
-            ts_display = "\033[1;31mOFFLINE\033[0m" # Bold Red
-        
-        print("[ N E T N A V I v 1.5 [Secured C2 Matrix] ]\n")
-        print(f"[*] System Time // {current_time}\n")
-        print("## WLAN Status")
-        print(f"    - Node IP Address   : {self.node_ip}")
-        print(f"    - Router Gateway    : {self.gateway}")
-        print(f"    - Operator ID       : {self.operator_name}")
-        print(f"    - Tailscale Status  : {ts_display}\n")
-        print("## Interactive CLI")
-        print("    1: Deploy NetNavi  - This is Where the Magic Begins\n")
-
-    def execute_scan(self, target, ports, deep=False):
-        try:
-            cmd = ["nmap", "-T4", "-Pn"]
-            if deep:
-                cmd.extend(["-sV", "--version-intensity", "2"])
-            if ports:
-                cmd.extend(["-p", ports])
-            cmd.append(target)
-
-            scan_type = "Deep Scan (-sV)" if deep else "Quick Scan (Port Discovery)"
-            print(f"[*] Executing {scan_type}: {' '.join(cmd)}...")
-            
-            timeout_val = 90 if deep else 30
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_val)
-            output = result.stdout if result.stdout else result.stderr
-            
-            self.log_scan(f"{'deep' if deep else 'quick'}_scan", target, output)
-            return output
-        except Exception as e:
-            return f"[-] Scan Error: {str(e)}"
-
-    def ask_groq_compact(self, prompt, context=""):
-        if not self.ai_enabled:
-            return ""
-        try:
-            memory_context = json.dumps(self.memory_data.get("custom_memory", {}))
-            system_prompt = (
-                f"You are NetNavi v1.5, an embedded AI assistant in a Termux C2 matrix operated by {self.operator_name}. "
-                f"Learned Context: {memory_context}. "
-                "Keep responses ultra-concise, technical, 1-2 sentences max. No markdown tutorials or refusals."
-            )
-            messages = [{"role": "system", "content": system_prompt}]
-            if context:
-                messages.append({"role": "user", "content": f"Output:\n{context}"})
-            messages.append({"role": "user", "content": prompt})
-
-            completion = self.groq_client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=messages,
-                temperature=0.3,
-                max_tokens=150,
-            )
-            return completion.choices[0].message.content
-        except Exception as e:
-            return f"[-] AI Error: {str(e)}"
-
-    def run_loop(self):
-        self.display_banner()
-
-        while self.running:
             try:
-                user_input = input("NetNavi > ").strip()
-                if not user_input:
-                    # Pressing Enter on an empty line instantly refreshes the status & UI with zero battery drain!
-                    self.display_banner()
-                    continue
-
-                lower_input = user_input.lower()
-
-                if lower_input in ["exit", "quit"]:
-                    print("[*] Shutting down matrix session.")
-                    self.running = False
-                    break
-
-                if lower_input in ["1", "deploy"]:
-                    self.display_banner()
-                    print("[*] NetNavi core online and synchronized.")
-                    continue
-
-                if lower_input == "clear":
-                    os.system('clear' if os.name == 'posix' else 'cls')
-                    self.display_banner()
-                    continue
-
-                if "remember that" in lower_input or "learn that" in lower_input:
-                    clean_fact = user_input.replace("remember that", "").replace("learn that", "").strip()
-                    parts = clean_fact.split(" is ", 1)
-                    if len(parts) == 2:
-                        k, v = parts[0].strip(), parts[1].strip()
-                        self.memory_data["custom_memory"][k] = v
-                        self.save_memory_state()
-                        print(f"[*] Memory Updated: Learned that '{k}' -> '{v}'")
-                    else:
-                        print("[-] Use format: 'Remember that [key] is [value]'")
-                    continue
-
-                if "my name is" in lower_input or "call me" in lower_input:
-                    parts = user_input.split()
-                    self.operator_name = parts[-1]
-                    self.save_memory_state()
-                    print(f"[*] Operator identity updated: {self.operator_name}")
-                    continue
-
-                if "what is my name" in lower_input or "whats my name" in lower_input:
-                    print(f"[*] Operator Name: {self.operator_name}")
-                    continue
-
-                if "memory" in lower_input or "what did you learn" in lower_input or "what do you know" in lower_input:
-                    print(self.get_learned_memory())
-                    continue
-
-                is_deep = "deep" in lower_input
-                is_network = any(trig in lower_input for trig in ["network", "all device", "all devices", "subnet", "devices"])
-                is_router = any(trig in lower_input for trig in ["router", "gateway"])
-
-                if is_network:
-                    self.gateway = self.detect_gateway()
-                    target = f"{self.gateway}/21"
-                    ports = "80,8080,21,23,445"
-                    scope_label = f"Entire Network Subnet ({target})"
-                    print(f"[*] Target Scope: {scope_label}")
-                    output = self.execute_scan(target, ports, deep=is_deep)
-                    print(output)
-                    analysis = self.ask_groq_compact(f"Analyze scan results for {target}:", context=output)
-                    if analysis:
-                        print(f"[AI] {analysis}\n")
-                    continue
-
-                elif is_router:
-                    self.gateway = self.detect_gateway()
-                    target = self.gateway
-                    ports = "80,8080,21,22,23,445"
-                    scope_label = f"Router Gateway ({target})"
-                    print(f"[*] Target Scope: {scope_label}")
-                    output = self.execute_scan(target, ports, deep=is_deep)
-                    print(output)
-                    analysis = self.ask_groq_compact(f"Analyze scan results for {target}:", context=output)
-                    if analysis:
-                        print(f"[AI] {analysis}\n")
-                    continue
-
-                parts = user_input.split(" ", 1)
-                action = parts[0].lower()
-                target = parts[1] if len(parts) > 1 else ""
-
-                if action in ["nmap", "ping", "w3m"]:
-                    cmd = [action]
-                    if action == "nmap":
-                        cmd = ["nmap", "-T4", "-Pn"]
-                        if "sV" in user_input or "deep" in user_input:
-                            cmd.append("-sV")
-                    elif action == "ping":
-                        cmd = ["ping", "-c", "3"]
-                    cmd.append(target)
-                    print(f"[*] Executing {' '.join(cmd)}...")
-                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-                    output = res.stdout if res.stdout else res.stderr
-                    print(output)
-                    analysis = self.ask_groq_compact(f"Analyze scan of {target}:", context=output)
-                    if analysis:
-                        print(f"[AI] {analysis}\n")
-                else:
-                    res = self.ask_groq_compact(user_input)
-                    print(f"{res}\n" if res else "[*] Executed.")
-
-            except KeyboardInterrupt:
-                print("\n[!] Interrupted.")
-                break
-
-if __name__ == "__main__":
-    netnavi = NetNaviUI()
-    netnavi.run_loop()
+                subprocess.run(hydra_cmd)
+                print(f"\n{C_GREEN}[*] Audit routine finished.{C_RESET}\n")
+            except Exception as e:
+                print(f"[!] Execution error: {e}\n")
+                
+        else:
+            print(f"Hello. How can I assist?\n")
+            
+    except KeyboardInterrupt:
+        print("\n[*] Session interrupted.")
+        break
