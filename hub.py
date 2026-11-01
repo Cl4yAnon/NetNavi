@@ -1,3 +1,4 @@
+from netnavi_manager import save_project, restore_project, purge_project, github_cloud_backup
 import subprocess
 import datetime
 import re
@@ -308,6 +309,10 @@ while True:
             subprocess.run(["clear"])
             render_dashboard(CURRENT_SSID)
 
+        elif lower_input in ["view routers", "routers", "list routers", "taxonomy", "poison pill", "poison pill taxonomy"]:
+            from routers import display_poison_pill_taxonomy
+            display_poison_pill_taxonomy()
+
         elif lower_input in ["wlan", "refresh", "status"]:
             print("\n[*] Re-sweeping WLAN interface and routing table...")
             subprocess.run(["clear"])
@@ -444,6 +449,10 @@ while True:
                 target_ip = input("Awaiting Target to Connect > ").strip() or gateway_ip
                 
             target_port = input("Choose your Poison (Port e.g. 80, 21) > ").strip()
+            if target_port == "80":
+                from routers import handle_router_matrix
+                handle_router_matrix(target_ip)
+                continue
             
             username = input("Enter target username (default 'admin'): ").strip() or "admin"
             wordlist = input("Enter path to wordlist (default 'wordlists/rockyou.txt'): ").strip() or "wordlists/rockyou.txt"
@@ -454,7 +463,9 @@ while True:
             print(f"\n{C_BLUE}[*] Jacking into target {target_ip}:{target_port} with user '{username}'...{C_RESET}")
             
             if target_port == "80":
-                hydra_cmd = ["hydra", "-l", username, "-P", wordlist, target_ip, "http-get", "/index.html", "-t", "4"]
+                from routers import handle_router_matrix
+                handle_router_matrix(target_ip)
+                continue
             elif target_port == "21":
                 hydra_cmd = ["hydra", "-l", username, "-P", wordlist, f"ftp://{target_ip}", "-t", "4"]
             else:
@@ -466,6 +477,20 @@ while True:
             except Exception as e:
                 print(f"[!] Execution error: {e}\n")
                 
+                    # NetNavi Failsafe Command Handlers
+        user_input_lower = user_input.strip().lower() if 'user_input' in locals() or 'user_input' in globals() else ""
+        if "save project" in user_input_lower:
+            print(f"\n{C_CYAN}[[*] NetNavi Failsafe Triggered]{C_RESET}")
+            save_project()
+        elif "restore project" in user_input_lower:
+            print(f"\n{C_CYAN}[[*] NetNavi Failsafe Triggered]{C_RESET}")
+            restore_project()
+        elif "purge project" in user_input_lower:
+            print(f"\n{C_CYAN}[[*] NetNavi Failsafe Triggered]{C_RESET}")
+            purge_project()
+        elif "github backup" in user_input_lower or "cloud backup" in user_input_lower:
+            print(f"\n{C_CYAN}[[*] NetNavi Failsafe Triggered]{C_RESET}")
+            github_cloud_backup()
         else:
             print(f"Hello. How can I assist?\n")
             

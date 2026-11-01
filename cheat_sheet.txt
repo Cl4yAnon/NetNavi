@@ -1,0 +1,24 @@
+==================================================
+              NETNAVI v1.5 COMMAND CHEAT SHEET
+==================================================
+
+[ CORE COMMANDS ]
+  connect <ip>         - Initialize target gateway audit (e.g., connect 192.168.1.1)
+  show quick scan      - Display active cached scan/audit results from memory slot
+  delete quick scan    - Flush and delete cached scan results from active memory
+  clear                - Refresh the NetNavi dashboard UI and live WLAN sweep
+  help                 - List all available operational commands
+  exit / quit          - Safely shut down the NetNavi C2 dashboard
+
+[ TARGET ROUTER AUDITING ]
+  - Target Profile     : PLDT / Globe ZTE F670L series gateways
+  - Protocol           : HTTPS / AJAX Token-Based RSA Handshake
+  - Default Ports      : Port 80 (Web Management Interface)
+  - Default User       : adminpldt
+  - Default Wordlist   : wordlists/rockyou.txt
+
+[ SYSTEM & ENVIRONMENT ]
+  - Project Directory  : ~/Projects/NetNavi
+  - Active Module Path : modules/router_audits/pldt_zte_f670l.py
+  - Script Deployment  : Always deploy/update mobile scripts using EOF blocks
+==================================================
