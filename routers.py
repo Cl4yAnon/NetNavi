@@ -1,5 +1,6 @@
 import os
-import subprocess
+import importlib.util
+import sys
 
 def list_registered_models(isp_dir):
     if not os.path.exists(isp_dir):
@@ -21,13 +22,13 @@ def display_poison_pill_taxonomy():
         
         print("\n## [1] PLDT / Smart Matrix")
         if not pldt_custom:
-            print(" [!] No custom models registered (empty)")
+            print(" [!] No custom models registered")
         for idx, m in enumerate(pldt_custom, 1):
             print(f" [{idx}] {m}.py")
             
         print("\n## [2] Globe Telecom Matrix")
         if not globe_custom:
-            print(" [!] No custom models registered (empty)")
+            print(" [!] No custom models registered")
         for idx, m in enumerate(globe_custom, 1):
             print(f" [{idx}] {m}.py")
             
@@ -51,9 +52,13 @@ def display_poison_pill_taxonomy():
                     file_path = os.path.join(target_dir, f"{model_name}.py")
                     with open(file_path, "w") as f:
                         f.write(f"# Router Model Stub: {model_name}\n")
+                        f.write("TARGET_PATH = \"/login.html\"\n\n")
                         f.write("def run_audit(target_ip, username, wordlist_path):\n")
+                        f.write("    import subprocess\n")
                         f.write(f"    print('[*] Executing audit for {model_name}')\n")
-                        f.write("    return None\n")
+                        f.write("    target_url = f\"http-get://{target_ip}{TARGET_PATH}\"\n")
+                        f.write("    hydra_cmd = [\"hydra\", \"-l\", username, \"-P\", wordlist_path, target_url, \"-t\", \"4\"]\n")
+                        f.write("    subprocess.run(hydra_cmd)\n")
                     print(f"[✔] Added: {model_name}.py")
                 else:
                     print("[!] Use 'pldt' or 'globe'.")
@@ -93,9 +98,6 @@ def handle_router_matrix(target_ip):
         target_dir = "modules/router_audits/pldt" if isp_choice == "1" else "modules/router_audits/globe"
         os.makedirs(target_dir, exist_ok=True)
         
-        print(f"\n[+] Target locked to: {isp_name} Architecture")
-        print("    Select Hardware Firmware Module:")
-        
         custom_models = list_registered_models(target_dir)
         
         if not custom_models:
@@ -103,8 +105,10 @@ def handle_router_matrix(target_ip):
             print("    Use the 'taxonomy' command to add models first.")
             return None
             
+        print(f"\n[+] Target locked to: {isp_name} Architecture")
+        print("    Select Hardware Firmware Module:")
         for idx, model_name in enumerate(custom_models, 1):
-            print(f"    [{idx}] {model_name.replace('_', ' ').title()}.py")
+            print(f"    [{idx}] {model_name}.py")
             
         model_choice = input(f"NetNavi [{isp_name} Model] > ").strip()
         
@@ -120,14 +124,16 @@ def handle_router_matrix(target_ip):
                 if not os.path.exists(wordlist):
                     print(f"[!] Warning: Wordlist '{wordlist}' not found. Check path.")
 
-                print(f"\n[*] Jacking into target {target_ip}:80 with user '{username}' using router model '{selected_model}'...")
+                module_path = os.path.join(target_dir, f"{selected_model}.py")
+                spec = importlib.util.spec_from_file_location(selected_model, module_path)
+                router_mod = importlib.util.module_from_spec(spec)
+                sys.modules[selected_model] = router_mod
+                spec.loader.exec_module(router_mod)
                 
-                hydra_cmd = ["hydra", "-l", username, "-P", wordlist, f"http-get://{target_ip}/", "-t", "4"]
-                print(f"[*] Executing audit vector: {' '.join(hydra_cmd)}")
-                try:
-                    subprocess.run(hydra_cmd)
-                except Exception as e:
-                    print(f"[!] Audit execution error: {e}")
+                if hasattr(router_mod, "run_audit"):
+                    router_mod.run_audit(target_ip, username, wordlist)
+                else:
+                    print(f"[!] Error: {selected_model}.py lacks a run_audit() function.")
             else:
                 print("[!] Invalid model index selection.")
     else:
