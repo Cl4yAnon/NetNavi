@@ -1,7 +1,18 @@
-rockyou.txt
-*.tar.gz
-*.json
+# Python bytecode & cache
 __pycache__/
 *.pyc
+
+# Local runtime storage & vaults (keeps your sensitive network history private!)
 .netnavi_storage/
-.env
+nodes_registry.json
+netnavi_logs.db
+netnavi_memory.json
+
+# Local backups & temporary debug scripts
+*.bak
+test_*.py
+debug_*.py
+fix_*.py
+
+# Wordlists (Wordlists can be large or locally specific; keep them out of git)
+wordlists/
