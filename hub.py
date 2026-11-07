@@ -30,7 +30,7 @@ def get_network_info():
     node_ip = "127.0.0.1"
     gateway = "192.168.1.1"
     isp = "PLDT / Smart"
-    
+
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('10.255.255.255', 1))
@@ -62,7 +62,7 @@ def get_network_info():
                 gateway = "192.168.254.254"
             else:
                 gateway = subnet_prefix + ".1"
-    
+
     if "192.168.100." in node_ip or "192.168.100." in gateway:
         isp = "Globe Fiber (192.168.100.x)"
     elif "192.168.254." in node_ip or "192.168.254." in gateway:
@@ -71,7 +71,7 @@ def get_network_info():
         isp = "PLDT / Smart"
     else:
         isp = f"Custom Gateway ({gateway.rsplit('.', 1)[0]}.x)"
-        
+
     return node_ip, gateway, isp
 
 def get_vault_filepath(gateway_ip, ssid_name):
@@ -97,7 +97,6 @@ def save_nodes_registry(registry):
         print(f"[!] Error saving nodes registry: {e}")
 
 def resolve_active_ssid(gateway_ip):
-    """Handles the once-per-session SSID prompt workflow."""
     registry = load_nodes_registry()
     gateway_data = registry.get(gateway_ip, {"ssids": []})
     existing_ssids = gateway_data.get("ssids", [])
@@ -107,14 +106,14 @@ def resolve_active_ssid(gateway_ip):
     if existing_ssids:
         print(f"\n{C_GREEN}[?] Gateway Recognized: {gateway_ip}{C_RESET}")
         is_new = input("Are you new to this SSID? (y/n): ").strip().lower()
-        
+
         if is_new in ["y", "yes"]:
             selected_ssid = prompt_new_ssid_entry(gateway_ip, existing_ssids, registry)
         else:
             print("\nSelect an existing SSID profile:")
             for idx, ssid in enumerate(existing_ssids, 1):
                 print(f"  {C_CYAN}{idx}){C_RESET} {ssid}")
-            
+
             choice = input(f"\nNetNavi > Select [1-{len(existing_ssids)}]: ").strip()
             try:
                 choice_idx = int(choice)
@@ -123,7 +122,7 @@ def resolve_active_ssid(gateway_ip):
                     print(f"{C_CYAN}[+] Loaded Profile: {selected_ssid}{C_RESET}\n")
             except ValueError:
                 pass
-            
+
             if not selected_ssid:
                 selected_ssid = existing_ssids[0]
                 print(f"{C_RED}[!] Invalid choice. Defaulting to: {selected_ssid}{C_RESET}\n")
@@ -161,7 +160,6 @@ def prompt_new_ssid_entry(gateway_ip, existing_ssids, registry):
     new_ssid = input("Enter a Brand New SSID Name > ").strip()
     if not new_ssid:
         new_ssid = f"GATEWAY_{gateway_ip.replace('.', '_')}"
-    
     if new_ssid not in existing_ssids:
         existing_ssids.append(new_ssid)
 
@@ -229,7 +227,7 @@ def get_netnavi_resource_usage():
 def render_dashboard(active_ssid):
     node_ip, gateway, isp = get_network_info()
     vault_data = load_or_init_vault(gateway, active_ssid)
-    
+
     ram_bytes, storage_bytes = get_netnavi_resource_usage()
     ram_str = format_size(ram_bytes)
     storage_str = format_size(storage_bytes)
@@ -240,18 +238,17 @@ def render_dashboard(active_ssid):
     print(f" - Node IP Address     : {node_ip}")
     print(f" - Router Gateway      : {gateway}")
     print(f" - ISP Provider        : {isp}")
-    
+
     print("\n## NetNavi Resources")
     print(f" - RAM     : {C_GREEN}{ram_str}{C_RESET}")
     print(f" - Storage : {C_GREEN}{storage_str}{C_RESET}")
-    
+
     print("\n## Interactive CLI")
     print(f" 1: {C_BLUE}Transcend{C_RESET} - This is Where the Magic Begins\n")
 
 def run_and_store_scan(cmd_args, scan_name, slot_key, active_ssid):
     node_ip, gateway_ip, _ = get_network_info()
     vault_data = load_or_init_vault(gateway_ip, active_ssid)
-    
     slot = vault_data["slots"][slot_key]
     if slot["results"]:
         print(f"\n{C_RED}[!] Scan logs already exist in slot '{slot_key}' for '{vault_data['ssid_name']}' (Scanned: {slot['timestamp']}){C_RESET}")
@@ -273,12 +270,12 @@ def run_and_store_scan(cmd_args, scan_name, slot_key, active_ssid):
                 print(f" {line}")
                 results.append(line)
         print()
-        
+
         timestamp = datetime.datetime.now().strftime('%b %d, %Y - %H:%M:%S')
         slot["type"] = scan_name
         slot["results"] = results
         slot["timestamp"] = timestamp
-            
+
         save_vault(vault_data)
         print(f"{C_CYAN}[*] Results permanently archived to slot '{slot_key}' in profile '{vault_data['ssid_name']}'{C_RESET}\n")
     except Exception as e:
@@ -295,16 +292,16 @@ while True:
     try:
         user_input = input("NetNavi > ").strip()
         lower_input = user_input.lower()
-        
+
         if not user_input:
             subprocess.run(["clear"])
             render_dashboard(CURRENT_SSID)
             continue
-            
+
         if lower_input in ["exit", "quit"]:
             print("[*] Shutting down matrix session.")
             break
-            
+
         elif lower_input in ["clear", "cls"]:
             subprocess.run(["clear"])
             render_dashboard(CURRENT_SSID)
@@ -436,64 +433,58 @@ while True:
             else:
                 print(" [!] No vault file found to purge.")
 
-        # IMMERSIVE SCI-FI TARGET CONNECT & HYDRA WORKFLOW
+        # IMMERSIVE SCI-FI TARGET CONNECT & ROUTER/AUDIT WORKFLOW
         elif lower_input.startswith("connect") or lower_input in ["jump", "audit", "crack"]:
             gateway_ip = get_network_info()[1]
-            
-            # Allow inline target parsing (e.g., 'connect 192.168.1.1')
+
             parts = user_input.split()
             if len(parts) > 1 and parts[1].count('.') == 3:
                 target_ip = parts[1]
             else:
                 print(f"\n{C_GREEN}[*] Found Target Cache to Connect{C_RESET}")
                 target_ip = input("Awaiting Target to Connect > ").strip() or gateway_ip
-                
-            target_port = input("Choose your Poison (Port e.g. 80, 21) > ").strip()
+
+            target_port = input("Choose your Poison (Port e.g. 80, 443, 21) > ").strip()
+            
             if target_port == "80":
                 from routers import handle_router_matrix
                 handle_router_matrix(target_ip)
                 continue
-            
+
             username = input("Enter target username (default 'admin'): ").strip() or "admin"
             wordlist = input("Enter path to wordlist (default 'wordlists/rockyou.txt'): ").strip() or "wordlists/rockyou.txt"
-            
+
             if not os.path.exists(wordlist):
                 print(f"[!] Warning: Wordlist '{wordlist}' not found. Check path.")
-            
+
             print(f"\n{C_BLUE}[*] Jacking into target {target_ip}:{target_port} with user '{username}'...{C_RESET}")
-            
+
             if target_port == "80":
                 from routers import handle_router_matrix
                 handle_router_matrix(target_ip)
+                continue
+            elif target_port == "443":
+                try:
+                    from modules.router_audits.pldt.zte import run_audit
+                    run_audit(target_ip, username, wordlist)
+                except Exception as e:
+                    print(f"[!] Error executing ZTE audit module: {e}")
+                
+                input("\nPress Enter to return to dashboard...")
+                subprocess.run(["clear"])
+                render_dashboard(CURRENT_SSID)
                 continue
             elif target_port == "21":
                 hydra_cmd = ["hydra", "-l", username, "-P", wordlist, f"ftp://{target_ip}", "-t", "4"]
-            else:
-                hydra_cmd = ["hydra", "-l", username, "-P", wordlist, target_ip, "-t", "4"]
-                
-            try:
                 subprocess.run(hydra_cmd)
-                print(f"\n{C_GREEN}[*] Audit routine finished.{C_RESET}\n")
-            except Exception as e:
-                print(f"[!] Execution error: {e}\n")
-                
-                    # NetNavi Failsafe Command Handlers
-        user_input_lower = user_input.strip().lower() if 'user_input' in locals() or 'user_input' in globals() else ""
-        if "save project" in user_input_lower:
-            print(f"\n{C_CYAN}[[*] NetNavi Failsafe Triggered]{C_RESET}")
-            save_project()
-        elif "restore project" in user_input_lower:
-            print(f"\n{C_CYAN}[[*] NetNavi Failsafe Triggered]{C_RESET}")
-            restore_project()
-        elif "purge project" in user_input_lower:
-            print(f"\n{C_CYAN}[[*] NetNavi Failsafe Triggered]{C_RESET}")
-            purge_project()
-        elif "github backup" in user_input_lower or "cloud backup" in user_input_lower:
-            print(f"\n{C_CYAN}[[*] NetNavi Failsafe Triggered]{C_RESET}")
-            github_cloud_backup()
-        else:
-            print(f"Hello. How can I assist?\n")
-            
+            else:
+                hydra_cmd = ["hydra", "-l", username, "-P", wordlist, f"http-get://{target_ip}:{target_port}", "-t", "4"]
+                subprocess.run(hydra_cmd)
+
+            input("\nPress Enter to return to dashboard...")
+            subprocess.run(["clear"])
+            render_dashboard(CURRENT_SSID)
+
     except KeyboardInterrupt:
         print("\n[*] Session interrupted.")
         break
